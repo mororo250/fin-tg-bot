@@ -3,20 +3,19 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const mod = b.addModule("lib_mod", .{
-        .root_source_file = b.path("src/root.zig"),
+    const tgbot_module = b.addModule("tgbot",.{
+        .root_source_file = b.path("src/tgbot.zig"),
         .target = target,
         .optimize = optimize
     });
     const exe_mod = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "tgbot_zig", .module = mod },
-            },
-        });
-
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "tgbot", .module = tgbot_module },
+        },
+    });
 
     const exe = b.addExecutable(.{
         .name = "exe_template",
@@ -34,8 +33,8 @@ pub fn build(b: *std.Build) void {
 
     const mod_tests = b.addTest(.{
         .name = "zig_tests",
-        .root_module = mod,
-        .test_runner = .{.path = b.path("src/test_runner.zig"), .mode = .simple },
+        .root_module = tgbot_module,
+        .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
     });
 
     b.installArtifact(mod_tests);
@@ -56,7 +55,7 @@ pub fn build(b: *std.Build) void {
 
     // This is a test of making zls work in tests.
     const check_test = b.addTest(.{
-        .root_module = mod,
+        .root_module = tgbot_module,
     });
 
     const check_step = b.step("check", "Check for zls analysis");
