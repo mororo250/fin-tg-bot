@@ -32,7 +32,7 @@ pub fn Owned(comptime T: type) type {
     };
 }
 
-pub fn Response(comptime T: type) type {
+fn Response(comptime T: type) type {
     return struct {
         ok: bool,
         result: ?T = null,
@@ -44,6 +44,7 @@ pub fn Response(comptime T: type) type {
 pub const Update = struct {
     update_id: i64,
     message: ?Message = null,
+    callback_query: ?CallbackQuery = null,
 };
 
 pub const User = struct {
@@ -79,7 +80,17 @@ pub const InlineKeyboardButton = struct {
 };
 
 pub const InlineKeyboardMarkup = struct {
-    inline_keyboard: [] const [] const InlineKeyboardButton,
+    inline_keyboard: []const []const InlineKeyboardButton,
+};
+
+pub const CallbackQuery = struct {
+    id: []const u8,
+    from: User,
+    message: ?Message = null,
+    inline_message_id: ?[]const u8 = null,
+    chat_instance: []const u8,
+    data: ?[]const u8 = null,
+    game_short_name: ?[]const u8 = null,
 };
 
 pub const SendMessagePayload = struct {
@@ -91,6 +102,11 @@ pub const SendMessageWithMarkupPayload = struct {
     chat_id: i64,
     text: []const u8,
     reply_markup: InlineKeyboardMarkup,
+};
+
+pub const AnswerCallbackQueryPayload = struct {
+    callback_query_id: []const u8,
+    text: []const u8,
 };
 
 pub fn getUpdates(self: *TgBot, offset: i64) !Owned([]Update) {
@@ -123,7 +139,7 @@ pub fn getUpdates(self: *TgBot, offset: i64) !Owned([]Update) {
     };
 }
 
-fn sendPostRequest(self: *TgBot, comptime PayloadType: type, comptime ResponseType: type, uri_path: []const u8, payload: PayloadType) !Owned(ResponseType) {
+fn sendPostRequest(self: *TgBot, comptime ResponseType: type, uri_path: []const u8, payload: anytype) !Owned(ResponseType) {
     const request_uri = try std.fmt.allocPrint(self.allocator, "https://api.telegram.org/bot{s}{s}", .{ self.token, uri_path });
     defer self.allocator.free(request_uri);
 
@@ -137,21 +153,13 @@ fn sendPostRequest(self: *TgBot, comptime PayloadType: type, comptime ResponseTy
     var transferBuffer: [1024]u8 = undefined;
     var body_writer = try request.sendBodyUnflushed(&transferBuffer);
     try std.json.Stringify.value(payload, .{}, &body_writer.writer);
-
     try body_writer.end();
     try request.connection.?.flush();
 
     var redirect_buffer: [1024]u8 = undefined;
     var response = try request.receiveHead(&redirect_buffer);
 
-    // used only for print debug
-    //const body = try response.reader(&.{}).allocRemaining(self.allocator, .unlimited);
-    //defer self.allocator.free(body);
-    //std.debug.print("Body: {s}", .{body});
-    // End of the debugger code
-
-    var transferBuffer2: [1024]u8 = undefined;
-    var json_reader = std.json.Scanner.Reader.init(self.allocator, response.reader(&transferBuffer2));
+    var json_reader = std.json.Scanner.Reader.init(self.allocator, response.reader(&transferBuffer));
     defer json_reader.deinit();
 
     const parsed = try std.json.parseFromTokenSource(Response(ResponseType), self.allocator, &json_reader, .{});
@@ -162,7 +170,7 @@ fn sendPostRequest(self: *TgBot, comptime PayloadType: type, comptime ResponseTy
         } else {
             std.debug.print("Error from telegram: unknown\n", .{});
         }
-        return error.NotValidResponse;
+        return error.ErrorFromTelegram;
     }
 
     return Owned(ResponseType){
@@ -176,7 +184,7 @@ pub fn sendTextMessage(self: *TgBot, chat_id: i64, text: []const u8) !Owned(Mess
         .chat_id = chat_id,
         .text = text,
     };
-    return self.sendPostRequest(SendMessagePayload, Message, "/sendMessage", payload);
+    return self.sendPostRequest(Message, "/sendMessage", payload);
 }
 
 pub fn sendTextMessageWithKeyboardMarkup(self: *TgBot, chat_id: i64, text: []const u8, keyboard: InlineKeyboardMarkup) !Owned(Message) {
@@ -185,7 +193,17 @@ pub fn sendTextMessageWithKeyboardMarkup(self: *TgBot, chat_id: i64, text: []con
         .text = text,
         .reply_markup = keyboard,
     };
-    return self.sendPostRequest(SendMessageWithMarkupPayload, Message, "/sendMessage", payload);
+    return self.sendPostRequest( Message, "/sendMessage", payload);
+}
+
+pub fn answerCallbackQuery(self: *TgBot, callback_query_id: []const u8, text: []const u8) !bool {
+    const payload = AnswerCallbackQueryPayload{
+        .callback_query_id = callback_query_id,
+        .text = text
+    };
+    var owned = try self.sendPostRequest(bool, "/answerCallbackQuery", payload);
+    owned.deinit();
+    return owned.value; // It's safe to call value here since value it's just a boolean.
 }
 
 test "getUpdates" {
@@ -218,9 +236,8 @@ test "sendMessage" {
     defer ownedMessage.deinit();
 }
 
-test "SendMessageWithKeyboardMarkup"
-{
- var client = std.http.Client{ .allocator = std.testing.allocator };
+test "SendMessageWithKeyboardMarkup" {
+    var client = std.http.Client{ .allocator = std.testing.allocator };
     defer client.deinit();
 
     const token = try std.process.getEnvVarOwned(std.testing.allocator, "TELEGRAM_TOKEN");
@@ -232,13 +249,11 @@ test "SendMessageWithKeyboardMarkup"
     var bot = TgBot.init(std.testing.allocator, &client, token);
     defer bot.deinit();
 
-    const keyboardArray :[] const InlineKeyboardButton = &.{
+    const keyboardArray: []const InlineKeyboardButton = &.{
         .{ .text = "Button 1", .callback_data = "1" },
         .{ .text = "Button 2", .callback_data = "2" },
     };
-    const keyboard : InlineKeyboardMarkup  = .{ .inline_keyboard = &.{
-        keyboardArray
-    }};
+    const keyboard: InlineKeyboardMarkup = .{ .inline_keyboard = &.{keyboardArray} };
     const ownedMessageWithMarkup = try bot.sendTextMessageWithKeyboardMarkup(chat_id, "Hello with markup!", keyboard);
     defer ownedMessageWithMarkup.deinit();
 }
