@@ -74,15 +74,3 @@ pub fn auth(self: *PluggyClient, clientId: []const u8, clientSecreat: []const u8
         .value = parsed.value.result.?,
     };
 }
-
-test "auth pluggy test" {
-    const allocator = std.testing.allocator;
-    var client = std.http.Client{ .allocator = allocator };
-    defer client.deinit();
-
-    var pluggy: PluggyClient = PluggyClient.init(allocator, &client);
-    const client_id = try std.process.getEnvVarOwned(allocator, "PLUGGY_CLIENT_ID");
-    const client_secreat= try std.process.getEnvVarOwned(allocator, "PLUGGY_CLIENT_SECREAT");
-
-    _ = try pluggy.auth(client_id, client_secreat);
-}

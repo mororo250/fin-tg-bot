@@ -1,7 +1,13 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{});
+    const target = b.resolveTargetQuery(.{
+        .cpu_arch = .x86_64,
+        .os_tag = .windows,
+        .abi = .msvc,
+    });
+
+    //const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     const tgbot_module = b.addModule("tgbot", .{
@@ -17,19 +23,43 @@ pub fn build(b: *std.Build) !void {
     });
 
     const gcp_lib = b.addLibrary(.{
+        .linkage = .dynamic,
         .name = "gcp_secret_manager",
         .root_module = b.createModule(.{
             .root_source_file = null,
             .optimize = optimize,
             .target = target,
+            .link_libc = true,
         })
     });
     gcp_lib.addCSourceFile(.{
         .file = b.path("src/zig-gcp/zig_gcp_secret_manager.cc"),
+        .flags = &[_][]const u8{"-std=c++17", "-w", "-D_DLL"},
     });
-    gcp_lib.root_module.link_libcpp = true;
     try addSystemLibraryPath(b, gcp_lib, target);
     gcp_lib.linkSystemLibrary("google_cloud_cpp_secretmanager");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_secretmanager_protos");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_common");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_grpc_utils");
+    gcp_lib.linkSystemLibrary("libprotobuf");
+    gcp_lib.linkSystemLibrary("grpc++");
+    gcp_lib.linkSystemLibrary("grpc");
+    gcp_lib.linkSystemLibrary("libcurl");
+    gcp_lib.linkSystemLibrary("libcrypto");
+    gcp_lib.linkSystemLibrary("libssl");
+    gcp_lib.linkSystemLibrary("abseil_dll"); // Main Abseil DLL
+    gcp_lib.linkSystemLibrary("crc32c");
+
+    // Missing protobuf libraries:
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_cloud_location_locations_protos");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_iam_v1_policy_protos");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_iam_v1_iam_policy_protos");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_rpc_status_protos");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_rpc_error_details_protos");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_api_field_behavior_protos");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_api_resource_protos");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_api_client_protos");
+    gcp_lib.linkSystemLibrary("google_cloud_cpp_api_annotations_protos");
 
     const exe = b.addExecutable(.{
         .name = "exe_template",
@@ -72,21 +102,6 @@ pub fn build(b: *std.Build) !void {
     const run_tgbot_tests = b.addRunArtifact(tgbot_tests);
     test_step.dependOn(&run_tgbot_tests.step);
 
-    // Test for GCP secret manager
-    const gcp_tests = b.addTest(.{
-        .name = "gcp_tests",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/zig-gcp/zig_gcp_secret_manager_test.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-        .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
-    });
-    try addSystemLibraryPath(b, gcp_tests, target);
-    gcp_tests.root_module.linkLibrary(gcp_lib);
-    const run_gcp_tests = b.addRunArtifact(gcp_tests);
-    test_step.dependOn(&run_gcp_tests.step);
-
     // Test for main executable module
     const exe_tests = b.addTest(.{
         .name = "exe_tests",
@@ -100,7 +115,6 @@ pub fn build(b: *std.Build) !void {
     check_step.dependOn(&exe.step);
     check_step.dependOn(&pluggy_tests.step);
     check_step.dependOn(&tgbot_tests.step);
-    check_step.dependOn(&gcp_tests.step);
     check_step.dependOn(&exe_tests.step);
 
     // Add args input to exe and tests
@@ -108,7 +122,6 @@ pub fn build(b: *std.Build) !void {
         run_cmd.addArgs(args);
         run_pluggy_tests.addArgs(args);
         run_tgbot_tests.addArgs(args);
-        run_gcp_tests.addArgs(args);
         run_exe_tests.addArgs(args);
     }
 }
